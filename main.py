@@ -18,6 +18,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -54,41 +55,54 @@ def issue_sertifikat():
         data = request.json
         prev_hash = get_last_block_hash()
 
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        if latitude:
+            latitude = float(latitude)
+        if longitude:
+            longitude = float(longitude)
+
         block_content = {
-            "nama_event": data['nama_event'],
-            "nama_peserta": data['nama_peserta'],
-            "waktu_mulai": data['waktu_mulai'],
+            "nama_event":    data['nama_event'],
+            "nama_lokasi":   data['nama_lokasi'],
+            "latitude":      latitude,
+            "longitude":     longitude,
+            "waktu_mulai":   data['waktu_mulai'],
+            "waktu_selesai": data['waktu_selesai'],
+            "nama_peserta":  data['nama_peserta'],
+            "keterangan":    data.get('keterangan', ''),
             "previous_hash": prev_hash
         }
+
         cert_hash = calculate_hash(block_content)
+        verify_url = f"{FRONTEND_URL}/verify/{cert_hash}"
 
         insert_data = {
-            "nama_event": data['nama_event'],
-            "nama_lokasi": data['nama_lokasi'],
-            "waktu_mulai": data['waktu_mulai'],
+            "nama_event":    data['nama_event'],
+            "nama_lokasi":   data['nama_lokasi'],
+            "latitude":      latitude,
+            "longitude":     longitude,
+            "waktu_mulai":   data['waktu_mulai'],
             "waktu_selesai": data['waktu_selesai'],
-            "nama_peserta": data['nama_peserta'],
-            "keterangan": data['keterangan'],
+            "nama_peserta":  data['nama_peserta'],
+            "keterangan":    data.get('keterangan', ''),
             "previous_hash": prev_hash,
-            "cert_hash": cert_hash
+            "cert_hash":     cert_hash,
+            "verify_url":    verify_url
         }
 
-        if data.get('latitude') and data.get('longitude'):
-            insert_data["location"] = f"POINT({data['longitude']} {data['latitude']})"
-
         supabase.table("sertifikat").insert(insert_data).execute()
-        return jsonify({"success": True, "hash": cert_hash}), 201
+        return jsonify({"success": True, "hash": cert_hash, "verify_url": verify_url}), 201
 
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-# ✅ Route baru: ambil semua data sertifikat
 @app.route('/sertifikat', methods=['GET'])
 def get_all_sertifikat():
     try:
         result = supabase.table("sertifikat") \
-            .select("id, nama_event, nama_lokasi, waktu_mulai, waktu_selesai, nama_peserta, keterangan, cert_hash, previous_hash") \
+            .select("id, nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at") \
             .order("id", desc=True) \
             .execute()
         return jsonify({"success": True, "data": result.data}), 200
