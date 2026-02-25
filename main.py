@@ -23,13 +23,11 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def calculate_hash(block_data):
-    """Menghitung SHA-256 hash untuk keamanan Blockchain."""
     block_string = json.dumps(block_data, sort_keys=True).encode()
     return hashlib.sha256(block_string).hexdigest()
 
 
 def get_last_block_hash():
-    """Mengambil hash terakhir dari tabel 'sertifikat'."""
     try:
         result = supabase.table("sertifikat").select("cert_hash").order("id", desc=True).limit(1).execute()
         return result.data[0]['cert_hash'] if result.data else "0"
@@ -78,9 +76,22 @@ def issue_sertifikat():
         if data.get('latitude') and data.get('longitude'):
             insert_data["location"] = f"POINT({data['longitude']} {data['latitude']})"
 
-        result = supabase.table("sertifikat").insert(insert_data).execute()
+        supabase.table("sertifikat").insert(insert_data).execute()
         return jsonify({"success": True, "hash": cert_hash}), 201
 
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+# ✅ Route baru: ambil semua data sertifikat
+@app.route('/sertifikat', methods=['GET'])
+def get_all_sertifikat():
+    try:
+        result = supabase.table("sertifikat") \
+            .select("id, nama_event, nama_lokasi, waktu_mulai, waktu_selesai, nama_peserta, keterangan, cert_hash, previous_hash") \
+            .order("id", desc=True) \
+            .execute()
+        return jsonify({"success": True, "data": result.data}), 200
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
