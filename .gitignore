@@ -1,0 +1,12 @@
+.env
+config.py
+instance/
+
+blockchain_data.json
+blockchain_backups/
+*.db
+*.sqlite3
+
+__pycache__/
+*.pyc
+*.pyo
