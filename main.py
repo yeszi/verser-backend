@@ -10,19 +10,23 @@ load_dotenv()
 
 app = Flask(__name__)
 
-CORS(app, origins=["https://verser-phi.vercel.app"])
+CORS(app, origins=[
+    "https://verser-phi.vercel.app",
+])
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")  
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD") 
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 
 def calculate_hash(block_data):
     """Menghitung SHA-256 hash untuk keamanan Blockchain."""
     block_string = json.dumps(block_data, sort_keys=True).encode()
     return hashlib.sha256(block_string).hexdigest()
+
 
 def get_last_block_hash():
     """Mengambil hash terakhir dari tabel 'sertifikat'."""
@@ -32,13 +36,19 @@ def get_last_block_hash():
     except:
         return "0"
 
+
+@app.route('/', methods=['GET'])
+def index():
+    return jsonify({"status": "ok", "message": "Backend VeriZh Chain is running!"})
+
+
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
-
     if data.get('username') == ADMIN_USERNAME and data.get('password') == ADMIN_PASSWORD:
         return jsonify({"success": True, "token": "access-granted-umrah"})
     return jsonify({"success": False, "message": "Username atau password salah"}), 401
+
 
 @app.route('/issue-sertifikat', methods=['POST'])
 def issue_sertifikat():
@@ -46,7 +56,6 @@ def issue_sertifikat():
         data = request.json
         prev_hash = get_last_block_hash()
 
-        # Logic Hashing untuk membuktikan Chain bekerja
         block_content = {
             "nama_event": data['nama_event'],
             "nama_peserta": data['nama_peserta'],
@@ -71,8 +80,10 @@ def issue_sertifikat():
 
         result = supabase.table("sertifikat").insert(insert_data).execute()
         return jsonify({"success": True, "hash": cert_hash}), 201
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route('/verify/<hash_val>', methods=['GET'])
 def verify(hash_val):
