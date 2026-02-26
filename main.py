@@ -1,10 +1,14 @@
 import os
 import hashlib
 import json
+import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import jwt
 
 load_dotenv()
 
@@ -14,12 +18,24 @@ CORS(app, origins=[
     "https://verser-phi.vercel.app",
 ])
 
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per hour"]
+)
+
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "access-granted-umrah")
+JWT_SECRET = os.getenv("JWT_SECRET")
+
+for var_name, var_val in [("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_KEY", SUPABASE_KEY),
+                           ("ADMIN_USERNAME", ADMIN_USERNAME), ("ADMIN_PASSWORD", ADMIN_PASSWORD),
+                           ("JWT_SECRET", JWT_SECRET)]:
+    if not var_val:
+        raise RuntimeError(f"{var_name} tidak boleh kosong!")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -38,24 +54,35 @@ def get_last_block_hash():
 
 
 def is_authorized():
-    token = request.headers.get('Authorization')
-    return token == f"Bearer {ADMIN_TOKEN}"
+    token = request.headers.get('Authorization', '').replace("Bearer ", "")
+    try:
+        jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return True
+    except Exception:
+        return False
 
 
 @app.route('/', methods=['GET'])
 def index():
-    return jsonify({"status": "ok", "message": "Backend VeriZh Chain is running!"})
+    return jsonify({"status": "ok", "message": "Chain is running!"})
 
 
 @app.route('/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
     data = request.json
     if data.get('username') == ADMIN_USERNAME and data.get('password') == ADMIN_PASSWORD:
-        return jsonify({"success": True, "token": ADMIN_TOKEN})
+        payload = {
+            "sub": "admin",
+            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+        }
+        token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+        return jsonify({"success": True, "token": token})
     return jsonify({"success": False, "message": "Username atau password salah"}), 401
 
 
 @app.route('/issue-sertifikat', methods=['POST'])
+@limiter.limit("30 per minute")
 def issue_sertifikat():
     if not is_authorized():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
@@ -107,6 +134,7 @@ def issue_sertifikat():
 
 
 @app.route('/sertifikat', methods=['GET'])
+@limiter.limit("60 per minute")
 def get_all_sertifikat():
     if not is_authorized():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
@@ -121,9 +149,12 @@ def get_all_sertifikat():
 
 
 @app.route('/verify/<hash_val>', methods=['GET'])
+@limiter.limit("20 per minute")
 def verify(hash_val):
     try:
-        result = supabase.table("sertifikat").select("*").eq("cert_hash", hash_val).execute()
+        result = supabase.table("sertifikat").select(
+            "nama_event, nama_lokasi, waktu_mulai, waktu_selesai, nama_peserta, keterangan, cert_hash, verify_url, created_at"
+        ).eq("cert_hash", hash_val).execute()
         if result.data:
             return jsonify({"status": "VALID", "data": result.data[0]}), 200
         return jsonify({"status": "INVALID", "message": "Hash tidak ditemukan!"}), 404
