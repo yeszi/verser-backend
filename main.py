@@ -19,6 +19,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "access-granted-umrah")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -36,6 +37,11 @@ def get_last_block_hash():
         return "0"
 
 
+def is_authorized():
+    token = request.headers.get('Authorization')
+    return token == f"Bearer {ADMIN_TOKEN}"
+
+
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({"status": "ok", "message": "Backend VeriZh Chain is running!"})
@@ -45,12 +51,14 @@ def index():
 def login():
     data = request.json
     if data.get('username') == ADMIN_USERNAME and data.get('password') == ADMIN_PASSWORD:
-        return jsonify({"success": True, "token": "access-granted-umrah"})
+        return jsonify({"success": True, "token": ADMIN_TOKEN})
     return jsonify({"success": False, "message": "Username atau password salah"}), 401
 
 
 @app.route('/issue-sertifikat', methods=['POST'])
 def issue_sertifikat():
+    if not is_authorized():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
     try:
         data = request.json
         prev_hash = get_last_block_hash()
@@ -100,6 +108,8 @@ def issue_sertifikat():
 
 @app.route('/sertifikat', methods=['GET'])
 def get_all_sertifikat():
+    if not is_authorized():
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
     try:
         result = supabase.table("sertifikat") \
             .select("id, nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at") \
@@ -119,6 +129,3 @@ def verify(hash_val):
         return jsonify({"status": "INVALID", "message": "Hash tidak ditemukan!"}), 404
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
-
-
-//made by grayesi anak keren//
