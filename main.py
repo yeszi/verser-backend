@@ -103,7 +103,7 @@ def get_all_sertifikat():
     try:
         result = supabase.table("sertifikat") \
             .select("id, nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at") \
-            .order("id", desc=True) \
+            .order("id", desc=False) \
             .execute()
         return jsonify({"success": True, "data": result.data}), 200
     except Exception as e:
@@ -119,3 +119,6 @@ def verify(hash_val):
         return jsonify({"status": "INVALID", "message": "Hash tidak ditemukan!"}), 404
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+//made by grayesi anak keren//
