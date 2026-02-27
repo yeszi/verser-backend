@@ -152,11 +152,46 @@ def get_all_sertifikat():
 @limiter.limit("20 per minute")
 def verify(hash_val):
     try:
+        # Ambil semua field yang dibutuhkan untuk verifikasi integritas
         result = supabase.table("sertifikat").select(
-            "nama_event, nama_lokasi, waktu_mulai, waktu_selesai, nama_peserta, keterangan, cert_hash, verify_url, created_at"
+            "nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at"
         ).eq("cert_hash", hash_val).execute()
-        if result.data:
-            return jsonify({"status": "VALID", "data": result.data[0]}), 200
-        return jsonify({"status": "INVALID", "message": "Hash tidak ditemukan!"}), 404
+
+        # Hash tidak ditemukan sama sekali di database
+        if not result.data:
+            return jsonify({"status": "INVALID", "message": "Hash tidak ditemukan!"}), 404
+
+        record = result.data[0]
+
+        # Hitung ulang hash dari data yang tersimpan di database
+        block_content = {
+            "nama_event":    record["nama_event"],
+            "nama_lokasi":   record["nama_lokasi"],
+            "latitude":      record["latitude"],
+            "longitude":     record["longitude"],
+            "waktu_mulai":   record["waktu_mulai"],
+            "waktu_selesai": record["waktu_selesai"],
+            "nama_peserta":  record["nama_peserta"],
+            "keterangan":    record["keterangan"],
+            "previous_hash": record["previous_hash"]
+        }
+        recomputed_hash = calculate_hash(block_content)
+
+        if recomputed_hash != record["cert_hash"]:
+            return jsonify({"status": "INVALID", "message": "Data sertifikat telah dimanipulasi!"}), 400
+
+        return_data = {
+            "nama_event":    record["nama_event"],
+            "nama_lokasi":   record["nama_lokasi"],
+            "waktu_mulai":   record["waktu_mulai"],
+            "waktu_selesai": record["waktu_selesai"],
+            "nama_peserta":  record["nama_peserta"],
+            "keterangan":    record["keterangan"],
+            "cert_hash":     record["cert_hash"],
+            "verify_url":    record["verify_url"],
+            "created_at":    record["created_at"]
+        }
+        return jsonify({"status": "VALID", "data": return_data}), 200
+
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
