@@ -13,7 +13,6 @@ import jwt
 load_dotenv()
 
 app = Flask(__name__)
-
 CORS(app, origins=[
     "https://verser-phi.vercel.app",
 ])
@@ -31,9 +30,13 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
 JWT_SECRET = os.getenv("JWT_SECRET")
 
-for var_name, var_val in [("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_KEY", SUPABASE_KEY),
-                           ("ADMIN_USERNAME", ADMIN_USERNAME), ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-                           ("JWT_SECRET", JWT_SECRET)]:
+for var_name, var_val in [
+    ("SUPABASE_URL", SUPABASE_URL),
+    ("SUPABASE_KEY", SUPABASE_KEY),
+    ("ADMIN_USERNAME", ADMIN_USERNAME),
+    ("ADMIN_PASSWORD", ADMIN_PASSWORD),
+    ("JWT_SECRET", JWT_SECRET)
+]:
     if not var_val:
         raise RuntimeError(f"{var_name} tidak boleh kosong!")
 
@@ -62,6 +65,13 @@ def is_authorized():
         return False
 
 
+def normalize_coordinate(value):
+    """Normalize latitude/longitude to float or None untuk konsistensi hashing."""
+    if value is None:
+        return None
+    return float(value)
+
+
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({"status": "ok", "message": "Chain is running!"})
@@ -86,26 +96,24 @@ def login():
 def issue_sertifikat():
     if not is_authorized():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
+
     try:
         data = request.json
         prev_hash = get_last_block_hash()
 
-        latitude = data.get('latitude')
-        longitude = data.get('longitude')
-        if latitude:
-            latitude = float(latitude)
-        if longitude:
-            longitude = float(longitude)
+        # Normalize koordinat agar konsisten saat hashing
+        latitude = normalize_coordinate(data.get('latitude'))
+        longitude = normalize_coordinate(data.get('longitude'))
 
         block_content = {
-            "nama_event":    data['nama_event'],
-            "nama_lokasi":   data['nama_lokasi'],
-            "latitude":      latitude,
-            "longitude":     longitude,
-            "waktu_mulai":   data['waktu_mulai'],
+            "nama_event": data['nama_event'],
+            "nama_lokasi": data['nama_lokasi'],
+            "latitude": latitude,
+            "longitude": longitude,
+            "waktu_mulai": data['waktu_mulai'],
             "waktu_selesai": data['waktu_selesai'],
-            "nama_peserta":  data['nama_peserta'],
-            "keterangan":    data.get('keterangan', ''),
+            "nama_peserta": data['nama_peserta'],
+            "keterangan": data.get('keterangan', ''),
             "previous_hash": prev_hash
         }
 
@@ -113,20 +121,21 @@ def issue_sertifikat():
         verify_url = f"{FRONTEND_URL}/verify/{cert_hash}"
 
         insert_data = {
-            "nama_event":    data['nama_event'],
-            "nama_lokasi":   data['nama_lokasi'],
-            "latitude":      latitude,
-            "longitude":     longitude,
-            "waktu_mulai":   data['waktu_mulai'],
+            "nama_event": data['nama_event'],
+            "nama_lokasi": data['nama_lokasi'],
+            "latitude": latitude,
+            "longitude": longitude,
+            "waktu_mulai": data['waktu_mulai'],
             "waktu_selesai": data['waktu_selesai'],
-            "nama_peserta":  data['nama_peserta'],
-            "keterangan":    data.get('keterangan', ''),
+            "nama_peserta": data['nama_peserta'],
+            "keterangan": data.get('keterangan', ''),
             "previous_hash": prev_hash,
-            "cert_hash":     cert_hash,
-            "verify_url":    verify_url
+            "cert_hash": cert_hash,
+            "verify_url": verify_url
         }
 
         supabase.table("sertifikat").insert(insert_data).execute()
+
         return jsonify({"success": True, "hash": cert_hash, "verify_url": verify_url}), 201
 
     except Exception as e:
@@ -138,21 +147,22 @@ def issue_sertifikat():
 def get_all_sertifikat():
     if not is_authorized():
         return jsonify({"success": False, "message": "Unauthorized"}), 401
+
     try:
         result = supabase.table("sertifikat") \
             .select("id, nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at") \
             .order("id", desc=False) \
             .execute()
         return jsonify({"success": True, "data": result.data}), 200
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 
-@app.route('/verify/<hash_val>', methods=['GET'])
+@app.route('/verify/<string:hash_val>', methods=['GET'])
 @limiter.limit("20 per minute")
 def verify(hash_val):
     try:
-        # Ambil semua field yang dibutuhkan untuk verifikasi integritas
         result = supabase.table("sertifikat").select(
             "nama_event, nama_lokasi, latitude, longitude, waktu_mulai, waktu_selesai, nama_peserta, keterangan, previous_hash, cert_hash, verify_url, created_at"
         ).eq("cert_hash", hash_val).execute()
@@ -163,35 +173,44 @@ def verify(hash_val):
 
         record = result.data[0]
 
+        latitude = normalize_coordinate(record["latitude"])
+        longitude = normalize_coordinate(record["longitude"])
+
         # Hitung ulang hash dari data yang tersimpan di database
         block_content = {
-            "nama_event":    record["nama_event"],
-            "nama_lokasi":   record["nama_lokasi"],
-            "latitude":      record["latitude"],
-            "longitude":     record["longitude"],
-            "waktu_mulai":   record["waktu_mulai"],
+            "nama_event": record["nama_event"],
+            "nama_lokasi": record["nama_lokasi"],
+            "latitude": latitude,
+            "longitude": longitude,
+            "waktu_mulai": record["waktu_mulai"],
             "waktu_selesai": record["waktu_selesai"],
-            "nama_peserta":  record["nama_peserta"],
-            "keterangan":    record["keterangan"],
+            "nama_peserta": record["nama_peserta"],
+            "keterangan": record["keterangan"],
             "previous_hash": record["previous_hash"]
         }
+
         recomputed_hash = calculate_hash(block_content)
 
         if recomputed_hash != record["cert_hash"]:
             return jsonify({"status": "INVALID", "message": "Data sertifikat telah dimanipulasi!"}), 400
 
         return_data = {
-            "nama_event":    record["nama_event"],
-            "nama_lokasi":   record["nama_lokasi"],
-            "waktu_mulai":   record["waktu_mulai"],
+            "nama_event": record["nama_event"],
+            "nama_lokasi": record["nama_lokasi"],
+            "waktu_mulai": record["waktu_mulai"],
             "waktu_selesai": record["waktu_selesai"],
-            "nama_peserta":  record["nama_peserta"],
-            "keterangan":    record["keterangan"],
-            "cert_hash":     record["cert_hash"],
-            "verify_url":    record["verify_url"],
-            "created_at":    record["created_at"]
+            "nama_peserta": record["nama_peserta"],
+            "keterangan": record["keterangan"],
+            "cert_hash": record["cert_hash"],
+            "verify_url": record["verify_url"],
+            "created_at": record["created_at"]
         }
+
         return jsonify({"status": "VALID", "data": return_data}), 200
 
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=False)
