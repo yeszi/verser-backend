@@ -41,7 +41,7 @@ limiter = Limiter(
 SUPABASE_URL        = os.getenv("SUPABASE_URL")
 SUPABASE_KEY        = os.getenv("SUPABASE_KEY")
 ADMIN_USERNAME      = os.getenv("ADMIN_USERNAME")
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")  # bcrypt hash, bukan plaintext
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")  
 FRONTEND_URL        = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
 JWT_SECRET          = os.getenv("JWT_SECRET")
 
