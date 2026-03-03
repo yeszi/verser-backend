@@ -5,5 +5,4 @@ supabase>=2.4.0
 flask-limiter>=4.0.0
 PyJWT>=2.0.0
 Werkzeug>=3.0.0
-argon2_cffi_bindings>=21.2.0
-argon2-cffi>=21.3.0
+bcrypt>=4.0.0

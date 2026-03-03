@@ -3,6 +3,7 @@ import hashlib
 import json
 import datetime
 import logging
+import bcrypt
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -10,8 +11,6 @@ from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from supabase import create_client, Client
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError, InvalidHashError
 import jwt
 
 
@@ -20,7 +19,6 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s'
 )
 logger = logging.getLogger(__name__)
-
 
 load_dotenv()
 
@@ -40,12 +38,12 @@ limiter = Limiter(
 )
 
 
-SUPABASE_URL          = os.getenv("SUPABASE_URL")
-SUPABASE_KEY          = os.getenv("SUPABASE_KEY")
-ADMIN_USERNAME        = os.getenv("ADMIN_USERNAME")
-ADMIN_PASSWORD_HASH   = os.getenv("ADMIN_PASSWORD_HASH")  
-FRONTEND_URL          = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
-JWT_SECRET            = os.getenv("JWT_SECRET")
+SUPABASE_URL        = os.getenv("SUPABASE_URL")
+SUPABASE_KEY        = os.getenv("SUPABASE_KEY")
+ADMIN_USERNAME      = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")  # bcrypt hash, bukan plaintext
+FRONTEND_URL        = os.getenv("FRONTEND_URL", "https://verser-phi.vercel.app")
+JWT_SECRET          = os.getenv("JWT_SECRET")
 
 _required_env = {
     "SUPABASE_URL"        : SUPABASE_URL,
@@ -62,13 +60,6 @@ for var_name, var_val in _required_env.items():
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-ph = PasswordHasher(
-    time_cost=2,
-    memory_cost=19456,
-    parallelism=1
-)
-
-
 
 def calculate_hash(block_data: dict) -> str:
     """SHA-256 hash dari block content untuk integritas sertifikat."""
@@ -79,8 +70,7 @@ def calculate_hash(block_data: dict) -> str:
 def get_last_block_hash() -> str:
     """
     Ambil hash block terakhir dari database untuk membentuk chain.
-    Raise RuntimeError jika database tidak bisa diakses,
-    agar issue sertifikat tidak lanjut dengan hash yang salah.
+    Raise jika DB error agar chain tidak rusak.
     """
     result = supabase.table("sertifikat") \
         .select("cert_hash") \
@@ -117,7 +107,7 @@ def normalize_coordinate(value):
 
 @app.route('/', methods=['GET'])
 def index():
-    return jsonify({"status": "ok", "message": "Running!"})
+    return jsonify({"status": "ok", "message": "Chain is running!"})
 
 
 @app.route('/login', methods=['POST'])
@@ -125,9 +115,9 @@ def index():
 def login():
     """
     Login admin.
-    - Username dicek duluan secara terpisah (timing-safe).
-    - Password diverifikasi dengan Argon2 (bukan plaintext compare).
-    - Pesan error dibuat generik agar tidak membocorkan info ke attacker.
+    - Username dicek duluan secara terpisah.
+    - Password diverifikasi dengan bcrypt.
+    - Pesan error generik agar tidak membocorkan info ke attacker.
     """
     data = request.get_json(silent=True)
 
@@ -140,14 +130,20 @@ def login():
     if not username or not password:
         return jsonify({"success": False, "message": "Username dan password wajib diisi"}), 400
 
-
     if username != ADMIN_USERNAME:
         logger.warning(f"Login gagal: username tidak dikenal dari IP {request.remote_addr}")
         return jsonify({"success": False, "message": "Username atau password salah"}), 401
 
     try:
 
-        ph.verify(ADMIN_PASSWORD_HASH, password)
+        password_match = bcrypt.checkpw(
+            password.encode('utf-8'),
+            ADMIN_PASSWORD_HASH.encode('utf-8')
+        )
+
+        if not password_match:
+            logger.warning(f"Login gagal: password salah dari IP {request.remote_addr}")
+            return jsonify({"success": False, "message": "Username atau password salah"}), 401
 
         payload = {
             "sub": "admin",
@@ -156,16 +152,6 @@ def login():
         }
         token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
         return jsonify({"success": True, "token": token}), 200
-
-    except VerifyMismatchError:
-
-        logger.warning(f"Login gagal: password salah dari IP {request.remote_addr}")
-        return jsonify({"success": False, "message": "Username atau password salah"}), 401
-
-    except InvalidHashError:
-
-        logger.error("ADMIN_PASSWORD_HASH tidak valid, cek konfigurasi env!")
-        return jsonify({"success": False, "message": "Konfigurasi server error"}), 500
 
     except Exception:
         logger.exception("Login: unexpected error")
@@ -259,6 +245,7 @@ def verify(hash_val):
         latitude  = normalize_coordinate(record["latitude"])
         longitude = normalize_coordinate(record["longitude"])
 
+        # Hitung ulang hash dari data tersimpan untuk verifikasi integritas
         block_content = {
             "nama_event"    : record["nama_event"],
             "nama_lokasi"   : record["nama_lokasi"],
